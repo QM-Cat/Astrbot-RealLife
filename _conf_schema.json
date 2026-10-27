@@ -1,0 +1,243 @@
+{
+  "base": {
+    "type": "object",
+    "description": "基础设置",
+    "hint": "开关、时区、模型和聊天注入。",
+    "items": {
+      "enabled": {
+        "description": "启用真人生活模拟",
+        "type": "bool",
+        "default": true,
+        "hint": "关闭后不再定时更新状态，已有日记和周记仍可查看。"
+      },
+      "timezone": {
+        "description": "时区",
+        "type": "string",
+        "default": "Asia/Shanghai",
+        "hint": "例如 Asia/Shanghai；填错时回退到系统时区。"
+      },
+      "provider_id": {
+        "description": "指定模型 Provider（可选）",
+        "type": "string",
+        "default": "",
+        "hint": "留空使用 AstrBot 当前对话模型；也可以填 Provider ID。"
+      },
+      "inject_status": {
+        "description": "聊天时注入当前状态",
+        "type": "bool",
+        "default": true,
+        "hint": "把“我正在做什么”加入 system_prompt，让回复更有人味。"
+      }
+    }
+  },
+  "schedule": {
+    "type": "object",
+    "description": "作息与状态更新",
+    "hint": "这里只控制插件何时推理；具体做什么由提示词决定。",
+    "items": {
+      "update_interval_minutes": {
+        "description": "状态更新间隔（分钟）",
+        "type": "int",
+        "default": 25,
+        "slider": {
+          "min": 5,
+          "max": 180,
+          "step": 5
+        },
+        "hint": "每隔多久让模型推断一次“现在在做什么”。"
+      },
+      "active_start": {
+        "description": "白天开始时间",
+        "type": "string",
+        "default": "07:30",
+        "hint": "格式 HH:MM。此时间到 active_end 之间才会定时调用模型。"
+      },
+      "active_end": {
+        "description": "白天结束时间",
+        "type": "string",
+        "default": "23:30",
+        "hint": "格式 HH:MM。到点后进入睡眠状态，不再调用模型。"
+      },
+      "allow_night_update": {
+        "description": "夜间也更新状态",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后会整夜调用模型，费用更高，一般不需要。"
+      },
+      "sleep_activity": {
+        "description": "睡觉时的活动名",
+        "type": "string",
+        "default": "睡觉",
+        "hint": "用于状态展示和睡眠判断。"
+      },
+      "sleep_location": {
+        "description": "睡觉地点",
+        "type": "string",
+        "default": "宿舍",
+        "hint": "夜间状态显示的地点。"
+      },
+      "sleep_detail": {
+        "description": "睡觉细节",
+        "type": "text",
+        "default": "已经睡着了，呼吸很轻，偶尔翻个身。",
+        "hint": "夜间状态会显示这句话。"
+      }
+    }
+  },
+  "diary": {
+    "type": "object",
+    "description": "日记与周记",
+    "items": {
+      "daily_time": {
+        "description": "每日日记时间",
+        "type": "string",
+        "default": "23:30",
+        "hint": "格式 HH:MM。18:00–23:59 写当天，00:00–11:59 写前一天；建议早于 active_end，先写日记再进入睡眠。"
+      },
+      "weekly_day": {
+        "description": "每周周记日",
+        "type": "int",
+        "default": 7,
+        "slider": {
+          "min": 1,
+          "max": 7,
+          "step": 1
+        },
+        "hint": "1=周一，7=周日。建议填 7，让周记覆盖完整一周。"
+      },
+      "weekly_time": {
+        "description": "周记时间",
+        "type": "string",
+        "default": "23:50",
+        "hint": "格式 HH:MM。建议晚于 daily_time，这样能包含当天的日记。"
+      },
+      "notify_session": {
+        "description": "通知会话 UMO",
+        "type": "string",
+        "default": "",
+        "hint": "留空不发送；用 /生活会话 获取当前会话的 UMO。"
+      },
+      "notify_daily": {
+        "description": "日记生成后自动发送",
+        "type": "bool",
+        "default": false,
+        "hint": "需要同时填写通知会话。"
+      },
+      "notify_weekly": {
+        "description": "周记生成后自动发送",
+        "type": "bool",
+        "default": false,
+        "hint": "需要同时填写通知会话。"
+      },
+      "min_activities_for_diary": {
+        "description": "写日记所需最少活动数",
+        "type": "int",
+        "default": 3,
+        "slider": {
+          "min": 1,
+          "max": 20,
+          "step": 1
+        },
+        "hint": "当天记录太少（例如 Bot 刚启动）时不硬写日记。"
+      }
+    }
+  },
+  "prompts": {
+    "type": "object",
+    "description": "提示词（行为由此控制）",
+    "hint": "留空使用内置默认提示词，完整默认值见插件目录的 prompts.py。可用变量见各字段说明；修改后保存并重载插件。",
+    "items": {
+      "life_prompt": {
+        "description": "生活设定提示词",
+        "type": "text",
+        "default": "",
+        "hint": "描述身份、作息和行为规则，是所有生成任务的 system prompt 基础。留空使用内置默认值。"
+      },
+      "activity_prompt": {
+        "description": "状态推断提示词",
+        "type": "text",
+        "default": "",
+        "hint": "可用变量：{date} {weekday} {time} {elapsed} {previous} {timeline}。留空使用内置默认值。"
+      },
+      "daily_prompt": {
+        "description": "日记提示词",
+        "type": "text",
+        "default": "",
+        "hint": "可用变量：{date} {weekday} {timeline} {activity_count}。留空使用内置默认值。"
+      },
+      "weekly_prompt": {
+        "description": "周记提示词",
+        "type": "text",
+        "default": "",
+        "hint": "可用变量：{week_start} {week_end} {week_label} {source_note} {material} {diary_count} {day_count}。留空使用内置默认值。"
+      },
+      "injection_template": {
+        "description": "聊天状态注入模板",
+        "type": "text",
+        "default": "",
+        "hint": "可用变量：{date} {weekday} {time} {activity} {location} {mood} {activity_line} {mood_line} {detail_line} {thought_line} {sleep_hint}。留空使用内置默认值。"
+      }
+    }
+  },
+  "advanced": {
+    "type": "object",
+    "description": "高级设置",
+    "items": {
+      "request_timeout_seconds": {
+        "description": "模型请求超时（秒）",
+        "type": "int",
+        "default": 120,
+        "slider": {
+          "min": 10,
+          "max": 600,
+          "step": 10
+        },
+        "hint": "生成日记或状态时单次请求的最长等待时间。"
+      },
+      "keep_days": {
+        "description": "时间线保留天数",
+        "type": "int",
+        "default": 30,
+        "slider": {
+          "min": 3,
+          "max": 365,
+          "step": 1
+        },
+        "hint": "超出的时间线会被清理；日记保留 365 天，周记保留约 370 天。"
+      },
+      "max_timeline_items": {
+        "description": "推断时参考的最近活动数",
+        "type": "int",
+        "default": 16,
+        "slider": {
+          "min": 3,
+          "max": 100,
+          "step": 1
+        },
+        "hint": "每次推断状态时，最多把最近多少条活动放进提示词。"
+      },
+      "max_timeline_per_day": {
+        "description": "每天最多保存的活动数",
+        "type": "int",
+        "default": 80,
+        "slider": {
+          "min": 10,
+          "max": 500,
+          "step": 10
+        },
+        "hint": "防止一天内记录过多；超出后删除最早的记录。"
+      },
+      "status_max_age_hours": {
+        "description": "状态注入最大时效（小时）",
+        "type": "int",
+        "default": 12,
+        "slider": {
+          "min": 1,
+          "max": 168,
+          "step": 1
+        },
+        "hint": "超过这个时间没更新，就不把旧状态注入聊天。"
+      }
+    }
+  }
+}
