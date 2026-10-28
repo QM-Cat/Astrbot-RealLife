@@ -174,6 +174,41 @@ class EngineTest(unittest.IsolatedAsyncioTestCase):
         await reloaded.load()
         self.assertEqual(reloaded.current_activity().activity, "赶去教学楼")
 
+    async def test_timeline_card_range(self) -> None:
+        clock = Clock(datetime(2026, 10, 28, 12, 0, tzinfo=TZ))
+        engine = self.make_engine(clock, FakeLLM([]))
+        await engine.load()
+        engine.data["timeline"] = {
+            "2026-10-27": [
+                activity(date(2026, 10, 27), "20:00", "写作业").to_dict()
+            ],
+            "2026-10-28": [
+                activity(date(2026, 10, 28), "09:00", "吃早饭").to_dict(),
+                activity(date(2026, 10, 28), "11:30", "上课").to_dict(),
+            ],
+        }
+        engine.data["current"] = activity(
+            date(2026, 10, 28), "11:30", "上课"
+        ).to_dict()
+
+        today = engine.render_timeline_card("")
+        self.assertIn("2026-10-28", today)
+        self.assertNotIn("2026-10-27", today)
+        self.assertIn("09:00", today)
+        self.assertIn("11:30", today)
+        self.assertEqual(today.count("上课"), 1)
+
+        both = engine.render_timeline_card("昨天")
+        self.assertIn("2026-10-27", both)
+        self.assertIn("2026-10-28", both)
+
+        from_ten = engine.render_timeline_card("2026-10-28 10:00")
+        self.assertIn("11:30", from_ten)
+        self.assertNotIn("09:00", from_ten)
+
+        self.assertIn("日期没看懂", engine.render_timeline_card("不是日期"))
+        self.assertIn("还没到", engine.render_timeline_card("明天"))
+
     async def test_dynamic_next_interval_and_clamp(self) -> None:
         clock = Clock(datetime(2026, 10, 27, 8, 0, tzinfo=TZ))
         llm = FakeLLM(

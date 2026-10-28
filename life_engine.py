@@ -1188,6 +1188,113 @@ class LifeEngine:
         lines.append(f"（{age}前更新）" if status_at else "（更新时间未知）")
         return "\n".join(lines)
 
+    def render_timeline_card(self, arg: str = "") -> str:
+        """查看从指定日期/时间到现在的活动时间线。"""
+        now = self._now_aware()
+        start = self._parse_timeline_start(arg, now)
+        if start is None:
+            return (
+                "🗓️ 时间线\n"
+                "日期没看懂，可以这样用：\n"
+                "/时间线\n"
+                "/时间线 昨天\n"
+                "/时间线 2026-10-27\n"
+                "/时间线 2026-10-27 08:00"
+            )
+        if start > now:
+            return "🗓️ 时间线\n这个时间还没到呢，换一个过去的时间试试。"
+
+        entries: list[Activity] = []
+        day_cursor = start.date()
+        while day_cursor <= now.date():
+            for item in self._activities_for(day_cursor):
+                stamp = self._parse_timestamp(item.timestamp)
+                if stamp is None:
+                    try:
+                        stamp = datetime.combine(
+                            day_cursor,
+                            time.fromisoformat(item.time),
+                            tzinfo=now.tzinfo,
+                        )
+                    except ValueError:
+                        continue
+                if start <= stamp <= now:
+                    entries.append(item)
+            day_cursor += timedelta(days=1)
+
+        # 睡眠状态是自动写入 current 的，不一定会进 timeline；补在最后。
+        current = self.current_activity()
+        if current:
+            stamp = self._parse_timestamp(current.timestamp)
+            if stamp and start <= stamp <= now:
+                if not entries or not current.is_same_as(entries[-1]):
+                    entries.append(current)
+
+        entries.sort(
+            key=lambda item: self._parse_timestamp(item.timestamp)
+            or datetime.min.replace(tzinfo=now.tzinfo)
+        )
+        total = len(entries)
+        limit = max(20, self.settings.max_timeline_items * 4)
+        truncated = total > limit
+        if truncated:
+            entries = entries[-limit:]
+
+        header = [
+            "🗓️ 生活时间线",
+            f"从 {start.strftime('%Y-%m-%d %H:%M')} 到现在 · {total} 条记录",
+        ]
+        if truncated:
+            header.append(f"（记录太多，只显示最近 {limit} 条）")
+        if not entries:
+            return "\n".join(header + ["", "（这段时间还没有记录）"])
+
+        lines = header
+        current_day = ""
+        for item in entries:
+            day_key = item.date
+            if not day_key:
+                stamp = self._parse_timestamp(item.timestamp)
+                day_key = stamp.date().isoformat() if stamp else ""
+            if day_key and day_key != current_day:
+                try:
+                    label = f"{day_key}（{weekday_cn(date.fromisoformat(day_key))}）"
+                except ValueError:
+                    label = day_key
+                lines.append(f"\n📅 {label}")
+                current_day = day_key
+            lines.append(_format_activity_line(item, with_detail=False))
+        return "\n".join(lines)
+
+    def _parse_timeline_start(self, arg: str, now: datetime) -> datetime | None:
+        text = (arg or "").strip().replace("T", " ", 1)
+        if not text:
+            return datetime.combine(now.date(), time.min, tzinfo=now.tzinfo)
+
+        time_only = re.match(r"^(\d{1,2}):(\d{2})$", text)
+        if time_only:
+            hour, minute = int(time_only.group(1)), int(time_only.group(2))
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                return None
+            return datetime.combine(
+                now.date(), time(hour, minute), tzinfo=now.tzinfo
+            )
+
+        with_time = re.match(r"^(.+?)\s+(\d{1,2}):(\d{2})$", text)
+        if with_time:
+            date_text = with_time.group(1).strip()
+            hour, minute = int(with_time.group(2)), int(with_time.group(3))
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                return None
+        else:
+            date_text = text
+            hour = minute = 0
+
+        day = parse_date_arg(date_text, now.date())
+        if day is None:
+            return None
+        return datetime.combine(day, time(hour, minute), tzinfo=now.tzinfo)
+
     def build_injection(self) -> str:
         """生成聊天时追加的状态块；启用插件时始终注入。"""
         if not self.settings.enabled:

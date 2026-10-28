@@ -334,6 +334,13 @@ class HumanLifePlugin(star.Star):
         """查看 Bot 此刻在做什么。"""
         yield event.plain_result(self.engine.render_status_card())
 
+    @filter.command("时间线", alias={"生活时间线"})
+    async def cmd_timeline(self, event: AstrMessageEvent):
+        """查看时间线：/时间线 [日期] [HH:MM]，留空默认今天。"""
+        yield event.plain_result(
+            self.engine.render_timeline_card(self._extract_arg(event))
+        )
+
     @filter.command("日记", alias={"看日记", "生活日记"})
     async def cmd_diary(self, event: AstrMessageEvent):
         """查看日记：/日记 [今天|昨天|日期|列表]。"""
@@ -404,6 +411,8 @@ class HumanLifePlugin(star.Star):
             "🐾 真人生活模拟\n"
             "我会按自己的作息生活，聊天时会自然带入当前状态。\n\n"
             "/状态　查看我此刻在做什么\n"
+            "/时间线　查看今天从早到现在的时间线\n"
+            "/时间线 昨天｜2026-10-27｜2026-10-27 08:00\n"
             "/日记　查看最新日记\n"
             "/日记 昨天｜2026-10-27｜列表\n"
             "/周记　查看最新周记\n"
