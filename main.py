@@ -62,6 +62,7 @@ class HumanLifePlugin(star.Star):
                 await self.engine.flush()
 
         self.settings = LifeSettings.from_mapping(dict(self.config))
+        await self._ensure_config_prompt_defaults()
         self.engine = LifeEngine(
             settings=self.settings,
             data_path=self.data_file,
@@ -75,6 +76,53 @@ class HumanLifePlugin(star.Star):
         self._task = asyncio.create_task(self._run_loop(), name=PLUGIN_NAME)
         self.logger.info("[真人生活] 已启动：%s", self.settings.describe())
         self.logger.info("[真人生活] 数据文件：%s", self.data_file)
+
+    async def _ensure_config_prompt_defaults(self) -> None:
+        """把旧配置里的空提示词补成内置默认值。
+
+        AstrBot 只会在配置项缺失时写入 schema 默认值，不会覆盖已经存下来的
+        空字符串；升级后需要主动补一次，面板里才能直接看到默认提示词。
+        """
+        if not isinstance(self.config, dict):
+            return
+        prompts = self.config.get("prompts")
+        if not isinstance(prompts, dict):
+            prompts = {}
+            self.config["prompts"] = prompts
+
+        defaults = {
+            "life_prompt": self.settings.life_prompt,
+            "activity_prompt": self.settings.activity_prompt,
+            "daily_prompt": self.settings.daily_prompt,
+            "weekly_prompt": self.settings.weekly_prompt,
+            "injection_template": self.settings.injection_template,
+        }
+        filled: list[str] = []
+        for key, value in defaults.items():
+            current = prompts.get(key)
+            if not isinstance(current, str) or not current.strip():
+                prompts[key] = value
+                filled.append(key)
+
+        if not filled:
+            return
+        try:
+            save_async = getattr(self.config, "save_config_async", None)
+            if callable(save_async):
+                await save_async()
+            else:
+                save = getattr(self.config, "save_config", None)
+                if callable(save):
+                    save()
+        except Exception:  # noqa: BLE001 - 配置写失败不应阻止插件启动
+            self.logger.warning(
+                "[真人生活] 补全默认提示词后保存配置失败，将在下次重载时重试",
+                exc_info=True,
+            )
+        else:
+            self.logger.info(
+                "[真人生活] 已把空提示词补为内置默认值：%s", ", ".join(filled)
+            )
 
     async def terminate(self) -> None:
         """插件卸载/重载时停止后台任务。"""
