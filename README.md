@@ -100,16 +100,23 @@ git clone https://github.com/QM-Cat/Astrbot-RealLife.git astrbot_plugin_human_li
 
 模型输出不是 JSON 时，会退化成“第一行当活动、全文当细节”，并用默认间隔兜底，不会因为一次格式错误停摆。
 
-### 2. 睡眠时段
+### 2. 睡眠时段与硬性睡眠开关
 
-`active_start` 到 `active_end`（默认 07:30–23:30）之外视为睡眠：
+`auto_sleep=true`（默认）时，`active_start` 到 `active_end`（默认 07:30–23:30）之外视为睡眠：
 
 - 不调用模型，节省费用；
 - 状态显示为“睡觉”，聊天注入会提示“可能是被消息吵醒的”；
 - 到了早上第一次更新时，会把“睡觉”作为上一刻状态，自然衔接到起床；
 - 睡眠中收到私聊消息会触发一次“被吵醒”的状态更新，并保留约 10 分钟清醒期；清醒期结束后再回到睡眠。
 
-如果希望整夜也持续模拟，可以打开 `allow_night_update`。
+关闭 `auto_sleep` 后：
+
+- 不再在 `active_end` 强制睡觉，也不会自动写入“睡觉”状态；
+- 全天都按模型给出的 `next_update_minutes` 更新，夜间同样会调用模型；
+- 提示词会额外说明“没有强制睡眠时段”，睡不睡完全由模型根据当前状态决定；
+- 这种模式下 `allow_night_update` 不再需要（它只在 `auto_sleep=true` 时生效）。
+
+如果只想让夜间也持续模拟、但仍保留强制睡眠逻辑，可以打开 `allow_night_update`。
 
 ### 3. 用户消息也会影响状态
 
@@ -121,7 +128,21 @@ git clone https://github.com/QM-Cat/Astrbot-RealLife.git astrbot_plugin_human_li
 
 群聊消息默认不参与（`interrupt_on_group_message=false`），避免群里每句话都触发状态更新。
 
-### 4. 日记与周记
+### 4. 管理员直接注入状态
+
+管理员可以用 `/状态更新 <描述>` 直接设置当前状态，不经过模型推断：
+
+```text
+/状态更新 我现在还不困，打算先聊完再睡觉。
+```
+
+- 当前状态会立刻变成这句话描述的样子；
+- 下一次更新默认安排在 30 分钟后；
+- 这条设定会作为“管理员临时设定”保留一段时间（夜间到次日 `active_start`，白天 4 小时），后续状态推断会尊重它；
+- 如果这句话表示“不困/还不睡”，硬性睡眠不会在下一轮 tick 把状态改回睡觉；
+- 再次发送 `/状态更新` 会覆盖上一条设定。
+
+### 5. 日记与周记
 
 - 每天 `daily_time`（默认 23:30）后，取当天完整时间线生成日记。放在 18:00–23:59 时写当天；放在 00:00–11:59 时写前一天，适合熬到零点再写日记的作息。
 - 每周 `weekly_day` + `weekly_time`（默认周日 23:50）后，汇总本周日记生成周记。
@@ -129,7 +150,7 @@ git clone https://github.com/QM-Cat/Astrbot-RealLife.git astrbot_plugin_human_li
 - Bot 重启后会补写“昨天/今天”尚未写的日记（最多两次），不会无限追历史。
 - 生成失败会按 15/30 分钟退避重试，避免频繁打模型。
 
-### 5. 聊天状态注入
+### 6. 聊天状态注入
 
 通过 AstrBot 的 `on_llm_request` 钩子，把下面这样的块作为**临时用户内容**（`req.extra_user_content_parts` + `TextPart.mark_as_temp()`）注入到当前用户消息侧，而不是修改 `system_prompt`：
 
@@ -158,6 +179,7 @@ git clone https://github.com/QM-Cat/Astrbot-RealLife.git astrbot_plugin_human_li
 | `/时间线` | 查看今天从 00:00 到现在的时间线 |
 | `/时间线 昨天` / `/时间线 2026-10-27` | 查看从指定日期 00:00 到现在 |
 | `/时间线 2026-10-27 08:00` | 查看从指定日期时间到现在 |
+| `/状态更新 <描述>` | 管理员：直接注入当前状态 |
 | `/日记` | 查看最新一篇日记 |
 | `/日记 今天` / `/日记 昨天` | 查看指定日期 |
 | `/日记 2026-10-27` | 查看指定日期（也支持 `2026/10/27`、`10-27`） |
@@ -196,9 +218,10 @@ WebUI 中分为五组：
 | --- | --- | --- |
 | `min_update_interval_minutes` | `3` | 最短更新间隔；模型给的更短时按此值 |
 | `max_update_interval_minutes` | `600` | 最长更新间隔；模型给的更长时按此值 |
-| `active_start` | `07:30` | 白天开始；之外视为睡眠 |
+| `active_start` | `07:30` | 白天开始；auto_sleep 开启时之外视为睡眠 |
 | `active_end` | `23:30` | 白天结束 |
-| `allow_night_update` | `false` | 夜间也调用模型 |
+| `auto_sleep` | `true` | 到点强制睡觉；关闭后全天由模型决定 |
+| `allow_night_update` | `false` | auto_sleep 开启时，夜间也调用模型 |
 | `sleep_activity` | `睡觉` | 睡眠状态名 |
 | `sleep_location` | `宿舍` | 睡眠地点 |
 | `sleep_detail` | 已睡着…… | 睡眠细节 |

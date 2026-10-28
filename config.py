@@ -95,6 +95,7 @@ class LifeSettings:
     max_update_interval_minutes: int = 600
     active_start: str = "07:30"
     active_end: str = "23:30"
+    auto_sleep: bool = True
     allow_night_update: bool = False
     sleep_activity: str = "睡觉"
     sleep_location: str = "宿舍"
@@ -168,6 +169,7 @@ class LifeSettings:
                 get(schedule, "active_start", "07:30"), "07:30"
             ),
             active_end=_as_str(get(schedule, "active_end", "23:30"), "23:30"),
+            auto_sleep=_as_bool(get(schedule, "auto_sleep", True), True),
             allow_night_update=_as_bool(
                 get(schedule, "allow_night_update", False), False
             ),
@@ -273,6 +275,7 @@ class LifeSettings:
             f"enabled={self.enabled} "
             f"interval={self.min_update_interval_minutes}-"
             f"{self.max_update_interval_minutes}min "
-            f"active={start}-{end} daily={daily} weekly={self.weekly_day}/{weekly} "
+            f"active={start}-{end} sleep={'auto' if self.auto_sleep else 'llm'} "
+            f"daily={daily} weekly={self.weekly_day}/{weekly} "
             f"tz={self.timezone}"
         )

@@ -528,6 +528,8 @@ class LifeEngine:
         self._dirty = False
         self._pending_interruption = ""
         self._awake_until: datetime | None = None
+        self._manual_override = ""
+        self._manual_override_until: datetime | None = None
 
     # -- 生命周期 ---------------------------------------------------------
 
@@ -588,7 +590,18 @@ class LifeEngine:
                     if entry:
                         notifications.append(("weekly", entry))
 
-                if self._in_active_window(now) or self.settings.allow_night_update:
+                if (
+                    self._manual_override_until
+                    and now >= self._manual_override_until
+                ):
+                    self._manual_override = ""
+                    self._manual_override_until = None
+
+                if not self.settings.auto_sleep:
+                    # 不硬性睡觉：全天都由模型决定作息。
+                    if self._status_due(now):
+                        await self._update_status(now)
+                elif self._in_active_window(now) or self.settings.allow_night_update:
                     if self._status_due(now):
                         await self._update_status(now)
                 elif self._awake_until and now < self._awake_until:
@@ -682,6 +695,11 @@ class LifeEngine:
                     )
 
         interruption = self._pending_interruption or "没有"
+        manual_note = ""
+        if self._manual_override and (
+            self._manual_override_until is None or now < self._manual_override_until
+        ):
+            manual_note = self._manual_override
         template = self.settings.activity_prompt
         prompt = render_template(
             template,
@@ -701,6 +719,17 @@ class LifeEngine:
                 "根据当前活动预计还能持续多久，给出下一次状态更新的间隔（整数分钟）。"
                 "参考：排队约3分钟，吃饭约20分钟，收拾约10分钟，上课约90分钟，"
                 "午睡约30-60分钟，睡觉约540分钟。不要使用固定间隔。"
+            )
+        if not self.settings.auto_sleep:
+            prompt += (
+                "\n\n【作息说明】插件没有强制睡眠时段；现在睡不睡完全由你根据"
+                "当前状态决定，不必因为时间晚就立刻睡觉。"
+            )
+        if manual_note:
+            prompt += (
+                "\n\n【管理员临时设定（仍然有效，优先级最高）】\n"
+                f"{manual_note}\n"
+                "在不违背这条设定的前提下更新状态；不要无故回到被它否定过的状态。"
             )
         system_prompt = self.settings.life_prompt
 
@@ -794,12 +823,46 @@ class LifeEngine:
         text = activity.activity.strip()
         if not text:
             return False
-        if any(token in text for token in ("睡醒", "醒来", "起床")):
+        # 这些词表示还醒着、准备睡或刚被打断，不能当成正在睡觉。
+        awake_markers = (
+            "睡醒",
+            "醒来",
+            "起床",
+            "吵醒",
+            "快醒",
+            "不困",
+            "不睡",
+            "不想睡",
+            "还没困",
+            "没睡着",
+            "睡不着",
+            "准备睡",
+            "打算睡",
+            "聊完再睡",
+            "再睡",
+            "睡前",
+        )
+        if any(token in text for token in awake_markers):
             return False
         if text == self.settings.sleep_activity:
             return True
         return any(
-            token in text for token in ("睡觉", "午睡", "打盹", "小憩", "睡着", "梦乡")
+            token in text
+            for token in (
+                "睡觉",
+                "睡着了",
+                "熟睡",
+                "午睡",
+                "打盹",
+                "小憩",
+                "梦乡",
+                "困了",
+                "要睡",
+                "想睡",
+                "去睡",
+                "睡了",
+                "入睡",
+            )
         )
 
     async def note_user_message(self, text: str) -> bool:
@@ -845,6 +908,71 @@ class LifeEngine:
                 self._set_current(current)
                 await self._save_if_dirty()
             return False
+
+    async def apply_manual_status(self, text: str) -> bool:
+        """管理员直接把当前状态改成 text 描述的样子。"""
+        if not self.settings.enabled:
+            return False
+        text = _clean_text(text, 240)
+        if not text:
+            return False
+
+        async with self._lock:
+            now = self._now_aware()
+            previous = self.current_activity()
+
+            # 去掉开头的人称/时间词，避免状态卡出现“你现在我现在……”。
+            activity_text = text.strip()
+            for prefix in ("我现在", "我", "现在"):
+                if activity_text.startswith(prefix):
+                    activity_text = activity_text[len(prefix):].lstrip("，,。 ")
+                    break
+            activity_text = _clean_text(activity_text, 40) or _clean_text(text, 40)
+
+            next_minutes = max(
+                self.settings.min_update_interval_minutes,
+                min(self.settings.max_update_interval_minutes, 30),
+            )
+            activity = Activity(
+                date=now.date().isoformat(),
+                time=now.strftime("%H:%M"),
+                activity=activity_text,
+                location="",
+                mood="",
+                detail=text,
+                thought="",
+                timestamp=now.isoformat(),
+                next_update_minutes=next_minutes,
+                next_update_at=(now + timedelta(minutes=next_minutes)).isoformat(),
+            )
+            if previous and previous.is_same_as(activity):
+                activity.time = previous.time
+                activity.date = previous.date or activity.date
+            else:
+                self._append_activity(activity)
+
+            self._set_current(activity)
+            self._pending_interruption = ""
+            self._retry_after.pop("status", None)
+            self._last_error = ""
+            self._manual_override = text
+            if self.settings.auto_sleep and not self._in_active_window(now):
+                self._manual_override_until = self._next_active_start(now)
+            else:
+                self._manual_override_until = now + timedelta(hours=4)
+
+            if self._is_sleeping(activity):
+                self._awake_until = None
+            elif self.settings.auto_sleep:
+                self._awake_until = self._manual_override_until
+
+            await self._save_if_dirty()
+            self._log.info(
+                "管理员注入状态：%s（下次 %s 分钟后）",
+                activity.activity,
+                next_minutes,
+            )
+            return True
 
     # -- 日记 -------------------------------------------------------------
 
@@ -1306,8 +1434,13 @@ class LifeEngine:
         now = self._now_aware()
         status_at = self._parse_timestamp(current.timestamp)
         sleeping = current.activity == self.settings.sleep_activity
-        if not sleeping and not self._in_active_window(now):
-            # 夜间还没切到睡眠状态时，宁可不注入，也不要说“正在打游戏”。
+        if (
+            self.settings.auto_sleep
+            and not sleeping
+            and not self._in_active_window(now)
+        ):
+            # 硬性睡眠开启时，夜间还没切到睡眠状态，宁可不注入，
+            # 也不要说“正在打游戏”；关闭硬性睡眠后完全按模型状态注入。
             return ""
         if not sleeping and status_at:
             max_age = timedelta(hours=self.settings.status_max_age_hours)

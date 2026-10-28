@@ -341,6 +341,25 @@ class HumanLifePlugin(star.Star):
             self.engine.render_timeline_card(self._extract_arg(event))
         )
 
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("状态更新", alias={"更新状态", "注入状态"})
+    async def cmd_manual_status(self, event: AstrMessageEvent):
+        """管理员直接注入当前状态：/状态更新 我现在还不困……"""
+        text = self._extract_arg(event)
+        if not text:
+            yield event.plain_result(
+                "用法：/状态更新 我现在还不困，打算先聊完再睡觉。\n"
+                "我会立刻按这句话更新当前状态。"
+            )
+            return
+        ok = await self.engine.apply_manual_status(text)
+        if not ok:
+            yield event.plain_result("状态更新失败了，插件可能没有启用，或者内容为空。")
+            return
+        yield event.plain_result(
+            "已经按你的要求注入当前状态。\n\n" + self.engine.render_status_card()
+        )
+
     @filter.command("日记", alias={"看日记", "生活日记"})
     async def cmd_diary(self, event: AstrMessageEvent):
         """查看日记：/日记 [今天|昨天|日期|列表]。"""
@@ -419,7 +438,7 @@ class HumanLifePlugin(star.Star):
             "/周记 本周｜上周｜2026-W44｜列表\n"
             "/生活帮助　显示这份说明\n\n"
             f"每天 {daily} 左右写日记，{weekly} 写周记。\n"
-            "管理员可用：/生活刷新、/生活会话。"
+            "管理员可用：/状态更新 我现在还不困……、/生活刷新、/生活会话。"
         )
 
 

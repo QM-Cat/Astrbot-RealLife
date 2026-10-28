@@ -108,12 +108,18 @@ def activity(day: date, clock: str, text: str, **kwargs) -> Activity:
 
 class EngineTest(unittest.IsolatedAsyncioTestCase):
     def make_engine(
-        self, clock: Clock, llm: FakeLLM, store: MemoryStore | None = None
+        self,
+        clock: Clock,
+        llm: FakeLLM,
+        store: MemoryStore | None = None,
+        *,
+        auto_sleep: bool = True,
     ) -> LifeEngine:
         settings = LifeSettings(
             timezone="Asia/Shanghai",
             min_update_interval_minutes=3,
             max_update_interval_minutes=600,
+            auto_sleep=auto_sleep,
             active_start="07:30",
             active_end="23:30",
             daily_time="23:30",
@@ -208,6 +214,68 @@ class EngineTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("日期没看懂", engine.render_timeline_card("不是日期"))
         self.assertIn("还没到", engine.render_timeline_card("明天"))
+
+    async def test_auto_sleep_disabled_uses_llm_at_night(self) -> None:
+        clock = Clock(datetime(2026, 10, 28, 2, 0, tzinfo=TZ))
+        llm = FakeLLM(
+            [
+                '{"activity":"熬夜写代码","location":"宿舍桌前",'
+                '"mood":"清醒","detail":"屏幕还亮着","next_update_minutes":20}'
+            ]
+        )
+        engine = self.make_engine(clock, llm, auto_sleep=False)
+        await engine.load()
+
+        await engine.tick()
+        self.assertEqual(engine.current_activity().activity, "熬夜写代码")
+        self.assertIn("没有强制睡眠时段", llm.calls[-1][1])
+        self.assertEqual(len(llm.calls), 1)
+
+    async def test_manual_status_injection_keeps_awake(self) -> None:
+        clock = Clock(datetime(2026, 10, 28, 23, 45, tzinfo=TZ))
+        llm = FakeLLM(
+            [
+                '{"activity":"还在聊天","location":"宿舍床上",'
+                '"mood":"清醒","detail":"手机屏幕亮着","next_update_minutes":20}'
+            ]
+        )
+        engine = self.make_engine(clock, llm)
+        await engine.load()
+        engine.data["current"] = activity(
+            date(2026, 10, 28),
+            "23:30",
+            "睡觉",
+            location="宿舍",
+            next_update_at=datetime(2026, 10, 29, 7, 30, tzinfo=TZ).isoformat(),
+            next_update_minutes=480,
+        ).to_dict()
+
+        ok = await engine.apply_manual_status(
+            "我现在还不困，打算先聊完再睡觉。"
+        )
+        self.assertTrue(ok)
+        current = engine.current_activity()
+        self.assertFalse(engine._is_sleeping(current))
+        self.assertIn("还不困", current.activity)
+        self.assertIn("先聊完再睡觉", current.detail)
+        self.assertEqual(llm.calls, [])
+        self.assertIsNotNone(engine._awake_until)
+        self.assertEqual(
+            engine._manual_override_until.date(), date(2026, 10, 29)
+        )
+
+        # 下一轮 tick 不会硬性把状态改回睡觉。
+        clock.value = datetime(2026, 10, 28, 23, 50, tzinfo=TZ)
+        await engine.tick()
+        self.assertEqual(engine.current_activity().activity, current.activity)
+        self.assertEqual(len(llm.calls), 0)
+
+        # 30 分钟后的正常状态推断会带上管理员临时设定。
+        clock.value = datetime(2026, 10, 29, 0, 15, tzinfo=TZ)
+        await engine.tick()
+        self.assertEqual(len(llm.calls), 1)
+        self.assertIn("管理员临时设定", llm.calls[-1][1])
+        self.assertIn("先聊完再睡觉", llm.calls[-1][1])
 
     async def test_dynamic_next_interval_and_clamp(self) -> None:
         clock = Clock(datetime(2026, 10, 27, 8, 0, tzinfo=TZ))

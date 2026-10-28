@@ -75,11 +75,17 @@
         "default": "23:30",
         "hint": "格式 HH:MM。到点后进入睡眠状态，不再调用模型。"
       },
+      "auto_sleep": {
+        "description": "到点强制睡觉",
+        "type": "bool",
+        "default": true,
+        "hint": "开启时 active_end 后不再调用模型并强制入睡；关闭后全天都由模型决定是否睡觉，夜间也会调用模型。"
+      },
       "allow_night_update": {
         "description": "夜间也更新状态",
         "type": "bool",
         "default": false,
-        "hint": "开启后会整夜调用模型，费用更高，一般不需要。"
+        "hint": "auto_sleep 开启时，夜间也调用模型；auto_sleep 关闭后此开关不再需要。"
       },
       "sleep_activity": {
         "description": "睡觉时的活动名",
