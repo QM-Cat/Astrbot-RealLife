@@ -845,7 +845,9 @@ class LifeEngine:
             "准备睡",
             "打算睡",
             "聊完再睡",
-            "再睡",
+            "晚点睡",
+            "等会儿睡",
+            "等会睡",
             "睡前",
         )
         if any(token in text for token in awake_markers):
