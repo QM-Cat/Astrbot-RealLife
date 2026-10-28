@@ -71,22 +71,34 @@ git clone https://github.com/QM-Cat/Astrbot-RealLife.git astrbot_plugin_human_li
 
 ## 工作方式
 
-### 1. 定时推断当前活动
+### 1. 动态推断当前活动
 
-后台每 30 秒检查一次，到了 `update_interval_minutes`（默认 25 分钟）就调用一次模型：
+后台每 30 秒检查一次，但**不是固定间隔更新**。每次更新时，模型会看到“距离上次记录多久”，并根据当前活动估计下一次更新间隔：
 
 ```text
 当前时间 + 星期 + 距离上次记录多久
 + 上一刻状态
 + 今天的时间线
++ 刚刚发生的干扰（如果有）
 + 生活设定提示词
         ↓
-模型输出 JSON：activity / location / mood / detail / thought
+模型输出 JSON：activity / location / mood / detail / thought / next_update_minutes
         ↓
-写入 current + timeline
+写入 current + timeline，并按 next_update_minutes 安排下一次
 ```
 
-模型输出不是 JSON 时，会退化成“第一行当活动、全文当细节”，不会因为一次格式错误停摆。
+`next_update_minutes` 会按 metadata 的 `min_update_interval_minutes` / `max_update_interval_minutes` 收敛。参考尺度：
+
+- 排队约 3 分钟
+- 吃饭约 20 分钟
+- 收拾约 10 分钟
+- 上课约 90 分钟
+- 午睡约 30–60 分钟
+- 睡觉约 540 分钟
+
+如果距离上次记录已经超过当前活动通常持续的时间，提示词会要求模型进入下一件事，而不是机械地继续“排队半小时”。
+
+模型输出不是 JSON 时，会退化成“第一行当活动、全文当细节”，并用默认间隔兜底，不会因为一次格式错误停摆。
 
 ### 2. 睡眠时段
 
@@ -94,11 +106,22 @@ git clone https://github.com/QM-Cat/Astrbot-RealLife.git astrbot_plugin_human_li
 
 - 不调用模型，节省费用；
 - 状态显示为“睡觉”，聊天注入会提示“可能是被消息吵醒的”；
-- 到了早上第一次更新时，会把“睡觉”作为上一刻状态，自然衔接到起床。
+- 到了早上第一次更新时，会把“睡觉”作为上一刻状态，自然衔接到起床；
+- 睡眠中收到私聊消息会触发一次“被吵醒”的状态更新，并保留约 10 分钟清醒期；清醒期结束后再回到睡眠。
 
 如果希望整夜也持续模拟，可以打开 `allow_night_update`。
 
-### 3. 日记与周记
+### 3. 用户消息也会影响状态
+
+收到私聊消息时（`interrupt_on_message`）：
+
+- 如果当前在睡觉，会立即触发一次“被消息吵醒”的状态更新；
+- 如果正在做别的事，会把下一次状态更新提前到最短间隔（默认 3 分钟），并把这条消息作为“刚刚发生的干扰”交给模型；
+- 模型可以决定继续当前活动、被打断后换一件事，或者只是分心看一眼。
+
+群聊消息默认不参与（`interrupt_on_group_message=false`），避免群里每句话都触发状态更新。
+
+### 4. 日记与周记
 
 - 每天 `daily_time`（默认 23:30）后，取当天完整时间线生成日记。放在 18:00–23:59 时写当天；放在 00:00–11:59 时写前一天，适合熬到零点再写日记的作息。
 - 每周 `weekly_day` + `weekly_time`（默认周日 23:50）后，汇总本周日记生成周记。
@@ -106,7 +129,7 @@ git clone https://github.com/QM-Cat/Astrbot-RealLife.git astrbot_plugin_human_li
 - Bot 重启后会补写“昨天/今天”尚未写的日记（最多两次），不会无限追历史。
 - 生成失败会按 15/30 分钟退避重试，避免频繁打模型。
 
-### 4. 聊天状态注入
+### 5. 聊天状态注入
 
 通过 AstrBot 的 `on_llm_request` 钩子，把下面这样的块作为**临时用户内容**（`req.extra_user_content_parts` + `TextPart.mark_as_temp()`）注入到当前用户消息侧，而不是修改 `system_prompt`：
 
@@ -158,12 +181,15 @@ WebUI 中分为五组：
 | `timezone` | `Asia/Shanghai` | 计算作息使用的时区 |
 | `provider_id` | 空 | 留空用当前对话模型，也可指定 Provider ID |
 | `inject_status` | `true` | 聊天时注入当前状态 |
+| `interrupt_on_message` | `true` | 私聊消息可唤醒/打断当前状态 |
+| `interrupt_on_group_message` | `false` | 群聊消息是否也可影响状态 |
 
 ### 作息与状态更新
 
 | 配置 | 默认 | 说明 |
 | --- | --- | --- |
-| `update_interval_minutes` | `25` | 状态更新间隔（分钟） |
+| `min_update_interval_minutes` | `3` | 最短更新间隔；模型给的更短时按此值 |
+| `max_update_interval_minutes` | `600` | 最长更新间隔；模型给的更长时按此值 |
 | `active_start` | `07:30` | 白天开始；之外视为睡眠 |
 | `active_end` | `23:30` | 白天结束 |
 | `allow_night_update` | `false` | 夜间也调用模型 |
@@ -194,12 +220,14 @@ WebUI 中分为五组：
 | 字段 | 作用 | 可用变量 |
 | --- | --- | --- |
 | `life_prompt` | 生活设定：身份、作息、行为规则 | 无 |
-| `activity_prompt` | 推断此刻在做什么 | `{date}` `{weekday}` `{time}` `{elapsed}` `{previous}` `{timeline}` |
+| `activity_prompt` | 推断此刻在做什么、下一次多久后更新 | `{date}` `{weekday}` `{time}` `{elapsed}` `{previous}` `{timeline}` `{interruption}` |
 | `daily_prompt` | 写日记 | `{date}` `{weekday}` `{timeline}` `{activity_count}` |
 | `weekly_prompt` | 写周记 | `{week_start}` `{week_end}` `{week_label}` `{source_note}` `{material}` `{diary_count}` `{day_count}` |
 | `injection_template` | 聊天状态注入模板 | `{date}` `{weekday}` `{time}` `{activity}` `{location}` `{mood}` `{activity_line}` `{mood_line}` `{detail_line}` `{thought_line}` `{sleep_hint}` |
 
 变量使用单次正则替换，提示词里的 JSON 花括号不会被误伤；未知变量会原样保留。
+
+`activity_prompt` 需要模型输出 `next_update_minutes`。如果自定义模板里没有写这个字段，插件会自动追加一段调度要求，保证动态间隔仍然生效。
 
 ### 高级设置
 

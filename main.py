@@ -50,6 +50,7 @@ class HumanLifePlugin(star.Star):
         self._task: asyncio.Task[None] | None = None
         self._stopping = False
         self._notify_session_warned = False
+        self._interrupt_tasks: set[asyncio.Task[Any]] = set()
 
     # -- 生命周期 ---------------------------------------------------------
 
@@ -133,6 +134,11 @@ class HumanLifePlugin(star.Star):
             with suppress(asyncio.CancelledError):
                 await self._task
             self._task = None
+        for task in list(self._interrupt_tasks):
+            task.cancel()
+        if self._interrupt_tasks:
+            await asyncio.gather(*self._interrupt_tasks, return_exceptions=True)
+            self._interrupt_tasks.clear()
         with suppress(Exception):
             await self.engine.flush()
         self.logger.info("[真人生活] 后台任务已停止。")
@@ -261,6 +267,32 @@ class HumanLifePlugin(star.Star):
             self.logger.exception("[真人生活] 发送 %s 通知失败", kind)
 
     # -- 聊天上下文注入 ---------------------------------------------------
+
+    @filter.event_message_type(filter.EventMessageType.ALL)
+    async def on_user_message(self, event: AstrMessageEvent) -> None:
+        """用户消息可能打断生活状态；异步处理，不阻塞正常回复。"""
+        if not self.settings.enabled or not self.settings.interrupt_on_message:
+            return
+        if not event.is_private_chat() and not self.settings.interrupt_on_group_message:
+            return
+        sender_id = event.get_sender_id()
+        self_id = event.get_self_id()
+        if sender_id and self_id and sender_id == self_id:
+            return
+        text = (event.message_str or "").strip()
+        if not text:
+            return
+        task = asyncio.create_task(self.engine.note_user_message(text))
+        self._interrupt_tasks.add(task)
+        task.add_done_callback(self._on_interrupt_done)
+
+    def _on_interrupt_done(self, task: asyncio.Task[Any]) -> None:
+        self._interrupt_tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            self.logger.warning("[真人生活] 处理消息打断状态失败：%s", exc)
 
     @filter.on_llm_request()
     async def inject_life_status(

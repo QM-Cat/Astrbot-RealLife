@@ -101,6 +101,8 @@ def activity(day: date, clock: str, text: str, **kwargs) -> Activity:
         detail=kwargs.get("detail", ""),
         thought=kwargs.get("thought", ""),
         timestamp=datetime.combine(day, datetime.strptime(clock, "%H:%M").time(), TZ).isoformat(),
+        next_update_minutes=kwargs.get("next_update_minutes", 0),
+        next_update_at=kwargs.get("next_update_at", ""),
     )
 
 
@@ -110,7 +112,8 @@ class EngineTest(unittest.IsolatedAsyncioTestCase):
     ) -> LifeEngine:
         settings = LifeSettings(
             timezone="Asia/Shanghai",
-            update_interval_minutes=25,
+            min_update_interval_minutes=3,
+            max_update_interval_minutes=600,
             active_start="07:30",
             active_end="23:30",
             daily_time="23:30",
@@ -131,9 +134,11 @@ class EngineTest(unittest.IsolatedAsyncioTestCase):
         llm = FakeLLM(
             [
                 '{"activity":"吃早饭","location":"食堂","mood":"满足",'
-                '"detail":"豆浆和两个包子","thought":"今天第一节有课"}',
+                '"detail":"豆浆和两个包子","thought":"今天第一节有课",'
+                '"next_update_minutes":20}',
                 '{"activity":"赶去教学楼","location":"路上","mood":"有点急",'
-                '"detail":"还有五分钟上课","thought":"别迟到"}',
+                '"detail":"还有五分钟上课","thought":"别迟到",'
+                '"next_update_minutes":90}',
             ]
         )
         store = MemoryStore()
@@ -143,6 +148,7 @@ class EngineTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await engine.tick(), [])
         self.assertEqual(len(llm.calls), 1)
         self.assertEqual(engine.current_activity().activity, "吃早饭")
+        self.assertEqual(engine.current_activity().next_update_minutes, 20)
         self.assertEqual(len(engine.data["timeline"]["2026-10-27"]), 1)
         self.assertIn("吃早饭", engine.render_status_card())
         self.assertIn("吃早饭", engine.build_injection())
@@ -163,6 +169,106 @@ class EngineTest(unittest.IsolatedAsyncioTestCase):
         reloaded = self.make_engine(clock, FakeLLM([]), store)
         await reloaded.load()
         self.assertEqual(reloaded.current_activity().activity, "赶去教学楼")
+
+    async def test_dynamic_next_interval_and_clamp(self) -> None:
+        clock = Clock(datetime(2026, 10, 27, 8, 0, tzinfo=TZ))
+        llm = FakeLLM(
+            [
+                '{"activity":"排队","location":"食堂","mood":"无聊",'
+                '"detail":"前面还有三个人","next_update_minutes":3}',
+                '{"activity":"排队","location":"食堂","mood":"无聊",'
+                '"detail":"前面还有三个人","next_update_minutes":999}',
+            ]
+        )
+        engine = self.make_engine(clock, llm)
+        await engine.load()
+
+        await engine.tick()
+        self.assertEqual(engine.current_activity().next_update_minutes, 3)
+        next_at = datetime.fromisoformat(engine.current_activity().next_update_at)
+        self.assertEqual(next_at, datetime(2026, 10, 27, 8, 3, tzinfo=TZ))
+
+        clock.value = datetime(2026, 10, 27, 8, 2, tzinfo=TZ)
+        await engine.tick()
+        self.assertEqual(len(llm.calls), 1)
+
+        clock.value = datetime(2026, 10, 27, 8, 3, tzinfo=TZ)
+        await engine.tick()
+        self.assertEqual(len(llm.calls), 2)
+        # 超过最大间隔时按 metadata 的最大值收敛。
+        self.assertEqual(engine.current_activity().next_update_minutes, 600)
+
+    async def test_dynamic_next_interval_min_clamp(self) -> None:
+        clock = Clock(datetime(2026, 10, 27, 8, 0, tzinfo=TZ))
+        llm = FakeLLM(
+            ['{"activity":"拿快递","location":"驿站","next_update_minutes":1}']
+        )
+        engine = self.make_engine(clock, llm)
+        await engine.load()
+        await engine.tick()
+        self.assertEqual(engine.current_activity().next_update_minutes, 3)
+
+    async def test_user_message_wakes_from_sleep(self) -> None:
+        clock = Clock(datetime(2026, 10, 28, 2, 0, tzinfo=TZ))
+        llm = FakeLLM(
+            [
+                '{"activity":"被消息吵醒，摸手机回消息","location":"床上",'
+                '"mood":"迷糊","detail":"眼睛还没睁开","next_update_minutes":5}'
+            ]
+        )
+        engine = self.make_engine(clock, llm)
+        await engine.load()
+        engine.data["current"] = activity(
+            date(2026, 10, 27),
+            "23:30",
+            "睡觉",
+            location="宿舍",
+            next_update_at=datetime(2026, 10, 28, 7, 30, tzinfo=TZ).isoformat(),
+            next_update_minutes=480,
+        ).to_dict()
+
+        woke = await engine.note_user_message("在吗")
+        self.assertTrue(woke)
+        self.assertNotEqual(engine.current_activity().activity, "睡觉")
+        self.assertIn("在吗", llm.calls[-1][1])
+        self.assertIn("吵醒", llm.calls[-1][1])
+        self.assertIsNotNone(engine._awake_until)
+
+        # 清醒期结束后回到睡眠，不再调用模型。
+        clock.value = datetime(2026, 10, 28, 2, 11, tzinfo=TZ)
+        await engine.tick()
+        self.assertEqual(engine.current_activity().activity, "睡觉")
+        self.assertEqual(len(llm.calls), 1)
+
+    async def test_user_message_brings_next_update_forward(self) -> None:
+        clock = Clock(datetime(2026, 10, 27, 10, 0, tzinfo=TZ))
+        llm = FakeLLM(
+            [
+                '{"activity":"偷偷回消息","location":"教室",'
+                '"mood":"心虚","detail":"把手机藏在课本下面","next_update_minutes":5}'
+            ]
+        )
+        engine = self.make_engine(clock, llm)
+        await engine.load()
+        engine.data["current"] = activity(
+            date(2026, 10, 27),
+            "09:30",
+            "上课",
+            location="教室",
+            next_update_at=datetime(2026, 10, 27, 11, 0, tzinfo=TZ).isoformat(),
+            next_update_minutes=90,
+        ).to_dict()
+
+        await engine.note_user_message("在吗")
+        self.assertEqual(llm.calls, [])
+        next_at = datetime.fromisoformat(engine.current_activity().next_update_at)
+        self.assertLessEqual(next_at, datetime(2026, 10, 27, 10, 3, tzinfo=TZ))
+
+        clock.value = datetime(2026, 10, 27, 10, 3, 30, tzinfo=TZ)
+        await engine.tick()
+        self.assertEqual(len(llm.calls), 1)
+        self.assertIn("在吗", llm.calls[-1][1])
+        self.assertEqual(engine.current_activity().activity, "偷偷回消息")
 
     async def test_night_sleeps_without_llm(self) -> None:
         clock = Clock(datetime(2026, 10, 28, 2, 0, tzinfo=TZ))
@@ -250,7 +356,13 @@ class EngineTest(unittest.IsolatedAsyncioTestCase):
             activity(day, "13:00", "午睡").to_dict(),
             activity(day, "20:00", "打游戏").to_dict(),
         ]
-        engine.data["current"] = activity(day, "23:25", "打游戏").to_dict()
+        engine.data["current"] = activity(
+            day,
+            "23:25",
+            "打游戏",
+            next_update_at=datetime(2026, 10, 27, 23, 35, tzinfo=TZ).isoformat(),
+            next_update_minutes=10,
+        ).to_dict()
 
         # 23:30 还没到 00:15，不应该把今天提前写成日记。
         notifications = await engine.tick()

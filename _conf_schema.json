@@ -26,24 +26,47 @@
         "description": "聊天时注入当前状态",
         "type": "bool",
         "default": true,
-        "hint": "把“我正在做什么”加入 system_prompt，让回复更有人味。"
+        "hint": "把“我正在做什么”作为临时用户内容注入，让回复更有人味，同时不污染 system_prompt。"
+      },
+      "interrupt_on_message": {
+        "description": "用户消息可影响状态",
+        "type": "bool",
+        "default": true,
+        "hint": "收到私聊消息时，睡眠中会被吵醒，其他状态会把下一次更新提前并参考消息内容。"
+      },
+      "interrupt_on_group_message": {
+        "description": "群聊消息也可影响状态",
+        "type": "bool",
+        "default": false,
+        "hint": "默认关闭，避免群里每句话都触发状态更新。"
       }
     }
   },
   "schedule": {
     "type": "object",
     "description": "作息与状态更新",
-    "hint": "这里只控制插件何时推理；具体做什么由提示词决定。",
+    "hint": "这里只控制最小/最大间隔；每次具体多久由模型根据活动估计。",
     "items": {
-      "update_interval_minutes": {
-        "description": "状态更新间隔（分钟）",
+      "min_update_interval_minutes": {
+        "description": "最短更新间隔（分钟）",
         "type": "int",
-        "default": 25,
-        "hint": "每隔多久让模型推断一次“现在在做什么”。",
+        "default": 3,
+        "hint": "模型给出的间隔低于此值时按此值；适合排队、拿快递等短活动。",
         "slider": {
-          "min": 5,
-          "max": 180,
-          "step": 5
+          "min": 1,
+          "max": 60,
+          "step": 1
+        }
+      },
+      "max_update_interval_minutes": {
+        "description": "最长更新间隔（分钟）",
+        "type": "int",
+        "default": 600,
+        "hint": "模型给出的间隔高于此值时按此值；睡觉等长活动可接近 9 小时。",
+        "slider": {
+          "min": 30,
+          "max": 1440,
+          "step": 10
         }
       },
       "active_start": {
@@ -156,7 +179,7 @@
       "activity_prompt": {
         "description": "状态推断提示词",
         "type": "text",
-        "default": "【当前时间】{date}（{weekday}）{time}\n【距离上次记录】{elapsed}\n【你上一刻的状态】\n{previous}\n\n【今天已经发生的事】\n{timeline}\n\n请根据当前时间、你的生活设定和上一刻的状态，判断你此刻正在做什么。要求：\n1. 和上一件事自然衔接，符合时间流逝以及你的体力、心情。\n2. 只写一个主要活动，具体、有画面感，不要写成计划或总结。\n3. 如果和上一刻是同一件事，可以补充进展或细节，不要机械重复。\n4. 只输出一个 JSON 对象，不要 Markdown 代码块，不要任何解释：\n{\n  \"activity\": \"正在做的事，20字以内，不要写地点\",\n  \"location\": \"当前地点，10字以内\",\n  \"mood\": \"当前心情，8字以内\",\n  \"detail\": \"正在做的细节或身体状态，80字以内\",\n  \"thought\": \"此刻脑子里冒出的第一人称念头，60字以内，可以留空\"\n}",
+        "default": "【当前时间】{date}（{weekday}）{time}\n【距离上次记录】{elapsed}\n【你上一刻的状态】\n{previous}\n\n【今天已经发生的事】\n{timeline}\n\n【刚刚发生的干扰】\n{interruption}\n\n请根据当前时间、你的生活设定、上一刻的状态和刚刚的干扰，判断你此刻正在做什么。要求：\n1. 和上一件事自然衔接，符合时间流逝以及你的体力、心情。如果距离上次记录已经超过这件事通常持续的时间，就进入下一件事。\n2. 只写一个主要活动，具体、有画面感，不要写成计划或总结。\n3. 如果和上一刻是同一件事，可以补充进展或细节，不要机械重复。\n4. 如果【刚刚发生的干扰】不是“没有”，把它当成刚刚发生的事：可能打断你、把你吵醒，或者只是让你分心看一眼；据此决定是否改变活动。\n5. 估计这件事接下来还会持续多久，并给出下次状态更新的间隔（分钟，整数）。参考：排队约3分钟，吃饭约20分钟，收拾约10分钟，上课约90分钟，午睡约30-60分钟，睡觉约540分钟。不要机械使用固定间隔。\n6. 只输出一个 JSON 对象，不要 Markdown 代码块，不要任何解释：\n{\n  \"activity\": \"正在做的事，20字以内，不要写地点\",\n  \"location\": \"当前地点，10字以内\",\n  \"mood\": \"当前心情，8字以内\",\n  \"detail\": \"正在做的细节或身体状态，80字以内\",\n  \"thought\": \"此刻脑子里冒出的第一人称念头，60字以内，可以留空\",\n  \"next_update_minutes\": 20\n}",
         "hint": "可用变量：{date} {weekday} {time} {elapsed} {previous} {timeline}。默认值已预填，可直接修改。"
       },
       "daily_prompt": {

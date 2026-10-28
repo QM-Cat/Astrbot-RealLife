@@ -7,7 +7,7 @@ AstrBot 的配置是嵌套 dict；这里把它收敛成一个带默认值的 dat
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, tzinfo
+from datetime import datetime, tzinfo
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -89,8 +89,11 @@ class LifeSettings:
     timezone: str = "Asia/Shanghai"
     provider_id: str = ""
     inject_status: bool = True
+    interrupt_on_message: bool = True
+    interrupt_on_group_message: bool = False
 
-    update_interval_minutes: int = 25
+    min_update_interval_minutes: int = 3
+    max_update_interval_minutes: int = 600
     active_start: str = "07:30"
     active_end: str = "23:30"
     allow_night_update: bool = False
@@ -136,17 +139,33 @@ class LifeSettings:
         weekly_day = _as_int(
             get(diary, "weekly_day", 7), 7, minimum=1, maximum=7
         )
+        min_interval = _as_int(
+            get(schedule, "min_update_interval_minutes", 3),
+            3,
+            minimum=1,
+            maximum=60,
+        )
+        max_interval = _as_int(
+            get(schedule, "max_update_interval_minutes", 600),
+            600,
+            minimum=5,
+            maximum=1440,
+        )
+        if max_interval < min_interval:
+            max_interval = min_interval
         return cls(
             enabled=_as_bool(get(base, "enabled", True), True),
             timezone=_as_str(get(base, "timezone", "Asia/Shanghai"), "Asia/Shanghai"),
             provider_id=_as_str(get(base, "provider_id", ""), ""),
             inject_status=_as_bool(get(base, "inject_status", True), True),
-            update_interval_minutes=_as_int(
-                get(schedule, "update_interval_minutes", 25),
-                25,
-                minimum=1,
-                maximum=720,
+            interrupt_on_message=_as_bool(
+                get(base, "interrupt_on_message", True), True
             ),
+            interrupt_on_group_message=_as_bool(
+                get(base, "interrupt_on_group_message", False), False
+            ),
+            min_update_interval_minutes=min_interval,
+            max_update_interval_minutes=max_interval,
             active_start=_as_str(
                 get(schedule, "active_start", "07:30"), "07:30"
             ),
@@ -246,10 +265,6 @@ class LifeSettings:
     def weekly_clock(self) -> tuple[int, int]:
         return parse_hhmm(self.weekly_time, "23:50")
 
-    @property
-    def update_interval(self) -> timedelta:
-        return timedelta(minutes=self.update_interval_minutes)
-
     def describe(self) -> str:
         """给日志用的一行摘要，不包含提示词正文。"""
         start = format_hhmm(*self.active_start_time)
@@ -257,7 +272,9 @@ class LifeSettings:
         daily = format_hhmm(*self.daily_clock)
         weekly = format_hhmm(*self.weekly_clock)
         return (
-            f"enabled={self.enabled} interval={self.update_interval_minutes}min "
+            f"enabled={self.enabled} "
+            f"interval={self.min_update_interval_minutes}-"
+            f"{self.max_update_interval_minutes}min "
             f"active={start}-{end} daily={daily} weekly={self.weekly_day}/{weekly} "
             f"inject={self.inject_status} tz={self.timezone}"
         )
