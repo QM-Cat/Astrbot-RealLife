@@ -1171,12 +1171,26 @@ class LifeEngine:
             lines.append(f"📝 {current.detail}")
         if current.thought:
             lines.append(f"💡 {current.thought}")
+        next_at = self._parse_timestamp(current.next_update_at)
+        if next_at is None and status_at and current.next_update_minutes > 0:
+            next_at = status_at + timedelta(minutes=current.next_update_minutes)
+        if next_at is None:
+            lines.append("⏰ 下次状态更新：时间未知")
+        elif next_at <= now:
+            lines.append("⏰ 下次状态更新：即将进行")
+        else:
+            when = next_at.strftime("%H:%M")
+            if next_at.date() != now.date():
+                when = f"{next_at.month}-{next_at.day} {when}"
+            lines.append(
+                f"⏰ 下次状态更新：{when}（约 {_format_duration(next_at - now)}后）"
+            )
         lines.append(f"（{age}前更新）" if status_at else "（更新时间未知）")
         return "\n".join(lines)
 
     def build_injection(self) -> str:
-        """生成聊天时追加到 system_prompt 的状态块。"""
-        if not self.settings.enabled or not self.settings.inject_status:
+        """生成聊天时追加的状态块；启用插件时始终注入。"""
+        if not self.settings.enabled:
             return ""
         current = self.current_activity()
         if current is None:

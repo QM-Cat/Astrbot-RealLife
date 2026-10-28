@@ -148,7 +148,7 @@ git clone https://github.com/QM-Cat/Astrbot-RealLife.git astrbot_plugin_human_li
 - 状态内容不会写进 `system_prompt`，避免周期性变化破坏模型缓存；也标记为临时内容，本次请求后不会持久化到上下文。
 - 用注释标记包裹，重复触发不会重复注入。
 - 状态超过 `status_max_age_hours` 未更新时不再注入，避免把陈旧状态带进聊天。
-- 可以在配置里关闭 `inject_status`。
+- 启用插件时状态注入始终开启，不提供关闭开关。
 
 ## 指令
 
@@ -169,6 +169,8 @@ git clone https://github.com/QM-Cat/Astrbot-RealLife.git astrbot_plugin_human_li
 
 > 指令前缀取决于 AstrBot 的唤醒/指令前缀配置；上面用 `/` 示意。
 
+`/状态` 会额外显示下一次状态更新的预期时间和倒计时，例如「⏰ 下次状态更新：21:21（约 18 分钟后）」。
+
 ## 配置说明
 
 WebUI 中分为五组：
@@ -180,7 +182,6 @@ WebUI 中分为五组：
 | `enabled` | `true` | 总开关；关闭后不再定时更新 |
 | `timezone` | `Asia/Shanghai` | 计算作息使用的时区 |
 | `provider_id` | 空 | 留空用当前对话模型，也可指定 Provider ID |
-| `inject_status` | `true` | 聊天时注入当前状态 |
 | `interrupt_on_message` | `true` | 私聊消息可唤醒/打断当前状态 |
 | `interrupt_on_group_message` | `false` | 群聊消息是否也可影响状态 |
 
@@ -302,7 +303,7 @@ A：当天活动数需达到 `min_activities_for_diary`；并且要过了 `daily
 A：周记需要本周至少有一篇日记，或至少两天的活动记录；默认在周日 23:50 之后生成。
 
 **Q：聊天里没有状态？**  
-A：确认 `inject_status=true`，并且当前状态没有超过 `status_max_age_hours`；第一次启动需要等后台完成一次更新。
+A：确认插件处于启用状态，并且当前状态没有超过 `status_max_age_hours`；第一次启动需要等后台完成一次更新。状态注入不提供关闭开关。
 
 **Q：能同时开多个 Bot 人格吗？**  
 A：插件数据按插件实例共享，不建议同一 AstrBot 实例里跑多份不同人格的副本；需要隔离时可以复制插件目录并修改 `PLUGIN_NAME`/数据文件名。

@@ -22,12 +22,6 @@
         "default": "",
         "hint": "留空使用 AstrBot 当前对话模型；也可以填 Provider ID。"
       },
-      "inject_status": {
-        "description": "聊天时注入当前状态",
-        "type": "bool",
-        "default": true,
-        "hint": "把“我正在做什么”作为临时用户内容注入，让回复更有人味，同时不污染 system_prompt。"
-      },
       "interrupt_on_message": {
         "description": "用户消息可影响状态",
         "type": "bool",

@@ -88,7 +88,6 @@ class LifeSettings:
     enabled: bool = True
     timezone: str = "Asia/Shanghai"
     provider_id: str = ""
-    inject_status: bool = True
     interrupt_on_message: bool = True
     interrupt_on_group_message: bool = False
 
@@ -157,7 +156,6 @@ class LifeSettings:
             enabled=_as_bool(get(base, "enabled", True), True),
             timezone=_as_str(get(base, "timezone", "Asia/Shanghai"), "Asia/Shanghai"),
             provider_id=_as_str(get(base, "provider_id", ""), ""),
-            inject_status=_as_bool(get(base, "inject_status", True), True),
             interrupt_on_message=_as_bool(
                 get(base, "interrupt_on_message", True), True
             ),
@@ -276,5 +274,5 @@ class LifeSettings:
             f"interval={self.min_update_interval_minutes}-"
             f"{self.max_update_interval_minutes}min "
             f"active={start}-{end} daily={daily} weekly={self.weekly_day}/{weekly} "
-            f"inject={self.inject_status} tz={self.timezone}"
+            f"tz={self.timezone}"
         )

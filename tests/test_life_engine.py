@@ -150,6 +150,10 @@ class EngineTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(engine.current_activity().activity, "吃早饭")
         self.assertEqual(engine.current_activity().next_update_minutes, 20)
         self.assertEqual(len(engine.data["timeline"]["2026-10-27"]), 1)
+        card = engine.render_status_card()
+        self.assertIn("下次状态更新", card)
+        self.assertIn("08:20", card)
+        self.assertIn("20 分钟", card)
         self.assertIn("吃早饭", engine.render_status_card())
         self.assertIn("吃早饭", engine.build_injection())
 
