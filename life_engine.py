@@ -732,6 +732,12 @@ class LifeEngine:
                 "在不违背这条设定的前提下更新状态；不要无故回到被它否定过的状态。"
             )
         system_prompt = self.settings.life_prompt
+        if not self.settings.auto_sleep:
+            system_prompt += (
+                "\n\n【临时说明】当前没有启用硬性睡眠；生活设定里关于"
+                "“睡眠时段必须睡觉”的限制本次不生效，睡不睡由你根据"
+                "当前状态自行决定。"
+            )
 
         try:
             raw = await self._llm_call(system_prompt, prompt)
@@ -1434,13 +1440,15 @@ class LifeEngine:
         now = self._now_aware()
         status_at = self._parse_timestamp(current.timestamp)
         sleeping = current.activity == self.settings.sleep_activity
+        awake_grace = bool(self._awake_until and now < self._awake_until)
         if (
             self.settings.auto_sleep
             and not sleeping
+            and not awake_grace
             and not self._in_active_window(now)
         ):
             # 硬性睡眠开启时，夜间还没切到睡眠状态，宁可不注入，
-            # 也不要说“正在打游戏”；关闭硬性睡眠后完全按模型状态注入。
+            # 也不要说“正在打游戏”；手动唤醒/消息唤醒的清醒期例外。
             return ""
         if not sleeping and status_at:
             max_age = timedelta(hours=self.settings.status_max_age_hours)

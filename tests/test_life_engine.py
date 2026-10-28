@@ -263,6 +263,7 @@ class EngineTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             engine._manual_override_until.date(), date(2026, 10, 29)
         )
+        self.assertIn("还不困", engine.build_injection())
 
         # 下一轮 tick 不会硬性把状态改回睡觉。
         clock.value = datetime(2026, 10, 28, 23, 50, tzinfo=TZ)
