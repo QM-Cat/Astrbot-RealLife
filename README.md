@@ -108,7 +108,7 @@ git clone https://github.com/QM-Cat/Astrbot-RealLife.git astrbot_plugin_human_li
 
 ### 4. 聊天状态注入
 
-通过 AstrBot 的 `on_llm_request` 钩子，把下面这样的块追加到 `system_prompt`：
+通过 AstrBot 的 `on_llm_request` 钩子，把下面这样的块作为**临时用户内容**（`req.extra_user_content_parts` + `TextPart.mark_as_temp()`）注入到当前用户消息侧，而不是修改 `system_prompt`：
 
 ```text
 <!-- human_life_status:start -->
@@ -122,6 +122,7 @@ git clone https://github.com/QM-Cat/Astrbot-RealLife.git astrbot_plugin_human_li
 <!-- human_life_status:end -->
 ```
 
+- 状态内容不会写进 `system_prompt`，避免周期性变化破坏模型缓存；也标记为临时内容，本次请求后不会持久化到上下文。
 - 用注释标记包裹，重复触发不会重复注入。
 - 状态超过 `status_max_age_hours` 未更新时不再注入，避免把陈旧状态带进聊天。
 - 可以在配置里关闭 `inject_status`。

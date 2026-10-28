@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import os
 import re
 from dataclasses import asdict, dataclass
@@ -489,7 +488,7 @@ class LifeEngine:
         settings: LifeSettings,
         data_path: Path | None = None,
         llm_call: Any,
-        logger: logging.Logger | None = None,
+        logger: Any,
         now_fn: Any = None,
         store: Any = None,
     ) -> None:
@@ -501,7 +500,7 @@ class LifeEngine:
                 raise ValueError("data_path 和 store 至少需要提供一个")
             self.store = LifeStore(data_path)
         self._llm_call = llm_call
-        self._log = logger or logging.getLogger(__name__)
+        self._log = logger
         self._now = now_fn or (lambda: datetime.now(settings.tzinfo))
         self.data: dict[str, Any] = empty_data()
         self._lock = asyncio.Lock()

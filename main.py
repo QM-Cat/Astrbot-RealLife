@@ -18,6 +18,7 @@ import astrbot.api.star as star
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.message_components import Plain
 from astrbot.api.provider import ProviderRequest
+from astrbot.core.agent.message import TextPart
 
 from .config import PLUGIN_NAME, LifeSettings
 from .life_engine import LifeEngine
@@ -265,7 +266,7 @@ class HumanLifePlugin(star.Star):
     async def inject_life_status(
         self, event: AstrMessageEvent, req: ProviderRequest
     ) -> None:
-        """把 Bot 当前的生活状态追加到 system_prompt。"""
+        """把当前生活状态作为临时用户内容注入，避免污染 system_prompt。"""
         try:
             block = self.engine.build_injection()
         except Exception:  # noqa: BLE001 - 注入失败不能影响正常聊天
@@ -273,10 +274,25 @@ class HumanLifePlugin(star.Star):
             return
         if not block:
             return
-        current_prompt = req.system_prompt or ""
-        if STATUS_MARKER in current_prompt:
+        if STATUS_MARKER in (req.system_prompt or ""):
             return
-        req.system_prompt = current_prompt.rstrip() + "\n\n" + block
+
+        parts = req.extra_user_content_parts
+        if parts is None:
+            parts = []
+            req.extra_user_content_parts = parts
+        for part in parts:
+            text = part.get("text") if isinstance(part, dict) else getattr(part, "text", "")
+            if isinstance(text, str) and STATUS_MARKER in text:
+                return
+
+        part = TextPart(text=block)
+        mark_temp = getattr(part, "mark_as_temp", None) or getattr(
+            part, "make_as_temp", None
+        )
+        if callable(mark_temp):
+            part = mark_temp()
+        parts.append(part)
         self.logger.debug("[真人生活] 已注入当前状态（%d 字）", len(block))
 
     # -- 指令 -------------------------------------------------------------

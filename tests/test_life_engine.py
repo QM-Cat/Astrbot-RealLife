@@ -82,6 +82,15 @@ class MemoryStore:
         self.data = copy.deepcopy(data)
 
 
+class NullLogger:
+    """测试用的空 logger，避免引入 Python 内置 logging。"""
+
+    def debug(self, *args, **kwargs) -> None:
+        pass
+
+    info = warning = error = exception = debug
+
+
 def activity(day: date, clock: str, text: str, **kwargs) -> Activity:
     return Activity(
         date=day.isoformat(),
@@ -112,6 +121,7 @@ class EngineTest(unittest.IsolatedAsyncioTestCase):
         return LifeEngine(
             settings=settings,
             llm_call=llm,
+            logger=NullLogger(),
             now_fn=clock,
             store=store or MemoryStore(),
         )
@@ -230,6 +240,7 @@ class EngineTest(unittest.IsolatedAsyncioTestCase):
         engine = LifeEngine(
             settings=settings,
             llm_call=llm,
+            logger=NullLogger(),
             now_fn=clock,
             store=MemoryStore(),
         )
@@ -299,6 +310,7 @@ class EngineTest(unittest.IsolatedAsyncioTestCase):
         engine = LifeEngine(
             settings=LifeSettings(timezone="Asia/Shanghai"),
             llm_call=BrokenLLM(),
+            logger=NullLogger(),
             now_fn=Clock(datetime(2026, 10, 27, 8, 0, tzinfo=TZ)),
             store=MemoryStore(),
         )
