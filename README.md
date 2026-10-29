@@ -1,5 +1,9 @@
 # 真人生活模拟（astrbot_plugin_human_life）
 
+<p align="center">
+  <img src="logo.png" width="180" alt="QM-Catty 真人生活模拟封面">
+</p>
+
 > 插件仓库：<https://github.com/QM-Cat/Astrbot-RealLife>  
 > 适用 AstrBot `>=4.24.0,<5.0.0`
 
